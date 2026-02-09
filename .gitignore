@@ -16,3 +16,8 @@ Proteinbase/plots_binders/
 Proteinbase/plots_binders_non_binders/
 Proteinbase/plots_no_designM/
 Proteinbase/csv_files/
+results/AF2/EGFR_AF2_panel/
+results/AF3/AF3_run1_output/
+results/Boltz-2/Boltz-2_run1/
+results/OpenFold2/openfold_run2_output/
+results/Protenix/Protenix_run_1/
