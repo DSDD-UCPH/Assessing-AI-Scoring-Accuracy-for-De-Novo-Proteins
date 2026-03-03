@@ -2,6 +2,7 @@ import os
 import csv
 import numpy as np
 from Bio.PDB import MMCIFParser, Superimposer
+import glob
 
 
 def get_ca_atoms_by_resid(structure, chain_id):
@@ -58,21 +59,26 @@ def rmsd_of_binder_after_alignment(struct_ref, struct_mob, align_chain, binder_c
 
     return rmsd
 
+def strip_egfr_suffix(folder_name):
+    """Remove _EGFR suffix from folder name if present."""
+    if folder_name.lower().endswith("_egfr"):
+        return folder_name[:-5]  # Remove last 5 characters
+    return folder_name
 
 # -----------------------------------------------------------------------
 #                      DIRECTORY SETUP (your original logic)
 # -----------------------------------------------------------------------
 
 af3_root = "/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/results/AF3/AF3_run1_output"
-boltz_root = "/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/results/Boltz-2/Boltz-2_run1"
+protenix_root = "/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/results/Protenix/Protenix_run_1"
 
 parser = MMCIFParser(QUIET=True)
 
-# Case-insensitive lookup for Boltz folders
-boltz_folders = {
-    folder.lower(): folder
-    for folder in os.listdir(boltz_root)
-    if os.path.isdir(os.path.join(boltz_root, folder))
+# Case-insensitive lookup for Protenix folders
+protenix_folders = {
+    strip_egfr_suffix(folder).lower(): folder
+    for folder in os.listdir(protenix_root)
+    if os.path.isdir(os.path.join(protenix_root, folder))
 }
 
 results = []
@@ -89,26 +95,35 @@ for af3_folder in os.listdir(af3_root):
 
     key = af3_folder.lower()
 
-    if key not in boltz_folders:
-        print(f"No Boltz folder match for {af3_folder}")
+    if key not in protenix_folders:
+        print(f"No Protenix folder match for {af3_folder}")
         continue
 
-    boltz_folder = boltz_folders[key]
-    boltz_folder_path = os.path.join(boltz_root, boltz_folder)
+    protenix_folder = protenix_folders[key]
+    protenix_folder_path = os.path.join(protenix_root, protenix_folder)
 
     # Get CIF filenames
     af3_cifs = [f for f in os.listdir(af3_folder_path) if f.lower().endswith(".cif")]
-    boltz_cifs = [f for f in os.listdir(boltz_folder_path) if f.lower().endswith(".cif")]
+
+    pattern = os.path.join(
+        protenix_folder_path,
+        "seed_*",
+        "predictions",
+        "*sample_0*.cif"
+        )
+
+    protenix_cifs = glob.glob(pattern)
 
     if not af3_cifs:
         print(f"No CIF in {af3_folder}")
         continue
-    if not boltz_cifs:
-        print(f"No CIF in {boltz_folder}")
+    if not protenix_cifs:
+        print(f"No sample_0 CIF in {protenix_folder}")
         continue
 
     af3_cif_path = os.path.join(af3_folder_path, af3_cifs[0])
-    boltz_cif_path = os.path.join(boltz_folder_path, boltz_cifs[0])
+    protenix_cif_path = os.path.join(protenix_folder_path, protenix_cifs[0])
+
 
     print(f"Processing {af3_folder}")
 
@@ -119,7 +134,7 @@ for af3_folder in os.listdir(af3_root):
         # -------------------------
         # RMSD when aligned on binder
         # -------------------------
-        structure_mob = parser.get_structure("mobA", boltz_cif_path)
+        structure_mob = parser.get_structure("mobA", protenix_cif_path)
         binder_rmsd_on_binder = rmsd_of_binder_after_alignment(
             structure_ref, structure_mob, align_chain="A"
         )
@@ -127,7 +142,7 @@ for af3_folder in os.listdir(af3_root):
         # -------------------------
         # RMSD when aligned on target
         # -------------------------
-        structure_mob = parser.get_structure("mobB", boltz_cif_path)
+        structure_mob = parser.get_structure("mobB", protenix_cif_path)
         binder_rmsd_on_target = rmsd_of_binder_after_alignment(
             structure_ref, structure_mob, align_chain="B"
         )

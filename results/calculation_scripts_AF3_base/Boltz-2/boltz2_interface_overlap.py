@@ -22,7 +22,6 @@ SUMMARY_CSV = "contact_summary_af3_boltz2.csv"
 
 CONTACT_CUTOFF = 5.0
 
-# Plot settings
 OUT_PREFIX = "af3_vs_boltz2"
 
 # ----------------------------
