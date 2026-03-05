@@ -15,8 +15,22 @@ import pandas as pd
 import csv
 from Bio.PDB import MMCIFParser, Superimposer, PDBParser
 import re
+from Bio.PDB.StructureBuilder import StructureBuilder
+import gemmi
+import tempfile
 
 ### Part 0. Functions. ###
+
+class PatchedMMCIFParser(MMCIFParser):
+    def _build_structure(self, structure_id):
+        mmcif_dict = self._mmcif_dict
+
+        # If occupancy column missing, create default one
+        if "_atom_site.occupancy" not in mmcif_dict:
+            n_atoms = len(mmcif_dict["_atom_site.Cartn_x"])
+            mmcif_dict["_atom_site.occupancy"] = ["1.0"] * n_atoms
+
+        super()._build_structure(structure_id)
 
 def get_ca_atoms_by_resid(structure, chain_id):
     """Return CA atoms dict {resid -> atom} for a given chain."""
@@ -89,30 +103,26 @@ def normalize_for_fuzzy_match(s):
     s = re.sub(r'[^a-z0-9.]', '', s)
     return s
 
-def strip_egfr_prefix(folder_name):
-    if folder_name.lower().startswith("egfr_"):
-        return folder_name[5:]
-    return folder_name
 
 ### Part 1. Directory setup. ###
 
 af3_root = "/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/results/AF3/AF3_run1_output"
-chai1_root = "/mnt/dsdd_share/Elliott/chai_run1"
+of3_root = "/mnt/dsdd_share/Elliott/of3_run1"
 
-parser = MMCIFParser(QUIET=True)
+parser = PatchedMMCIFParser(QUIET=True)
 
 results = []
 
-# --- Chai-1 lookup ---
-chai1_lookup = {}
+# --- OF3 lookup ---
+of3_lookup = {}
 
-for folder in os.listdir(chai1_root):
-    full_path = os.path.join(chai1_root, folder)
+for folder in os.listdir(of3_root):
+    full_path = os.path.join(of3_root, folder)
     if not os.path.isdir(full_path):
         continue
 
     normalized = normalize_for_fuzzy_match(folder)
-    chai1_lookup[normalized] = folder
+    of3_lookup[normalized] = folder
 
 # --- AF3 lookup ---
 af3_lookup = {}
@@ -135,16 +145,16 @@ for _, row in df.iterrows():
     csv_id = normalize_for_fuzzy_match(str(row["id"]))
     csv_name = normalize_for_fuzzy_match(str(row["name"]))
 
-    chai1_folder = chai1_lookup.get(csv_id)
+    of3_folder = of3_lookup.get(csv_id)
     af3_folder = af3_lookup.get(csv_name)
 
-    if chai1_folder and af3_folder:
-        pairs.append((chai1_folder, af3_folder))
+    if of3_folder and af3_folder:
+        pairs.append((of3_folder, af3_folder))
     else:
         print(f"Could not match: id={csv_id}, name={csv_name}")
 
-for chai1_folder, af3_folder in pairs:
-    chai1_folder_path = os.path.join(chai1_root, chai1_folder)
+for of3_folder, af3_folder in pairs:
+    of3_folder_path = os.path.join(of3_root, of3_folder)
     af3_folder_path = os.path.join(af3_root, af3_folder)
 
     # Get AF3 CIF
@@ -156,44 +166,62 @@ for chai1_folder, af3_folder in pairs:
 
     af3_cif_path = os.path.join(af3_folder_path, af3_cifs[0])
 
-    # Get CHAI-1 CIF
+    # OF3 CIFs
 
-    npz_files = [f for f in os.listdir(chai1_folder_path) if f.lower().endswith(".npz") and "scores.model_idx_" in f]
+    seed_folders = [os.path.join(of3_folder_path, d) for d in os.listdir(of3_folder_path) if os.path.isdir(os.path.join(of3_folder_path, d)) and d.startswith("seed_")]
 
-    if not npz_files:
-        print(f"No scored npz in CHAI-1 folder {chai1_folder}")
+    if not seed_folders:
+        print(f"No seed folder in {of3_folder}")
+        continue
+
+    seed_path = seed_folders[0]
+
+    json_files = [
+        f for f in os.listdir(seed_path)
+        if f.endswith(".json") and "confidences_aggregated" in f
+    ]
+    if not json_files:
+        print(f"No confidence JSON files in {seed_path}")
         continue
 
     scores = {}
 
-    for npz_file in npz_files:
-        npz_path = os.path.join(chai1_folder_path, npz_file)
-        data = np.load(npz_path, allow_pickle=True)
-        if "aggregate_score" not in data:
-            print(f"No aggregate_score in {npz_file}")
+    for json_file in json_files:
+        json_path = os.path.join(seed_path, json_file)
+        with open(json_path, "r") as jf:
+            data = json.load(jf)
+
+        if "sample_ranking_score" not in data:
+            print(f"No 'sample_ranking_score' in {json_file}")
             continue
 
-        score = data["aggregate_score"].item()
+        score = data["sample_ranking_score"]
 
-        model_idx = int(npz_file.split("_")[-1].split(".")[0])
+        match = re.search(r"_sample_(\d+)_", json_file)
+        if not match:
+            print(f"Could not parse model index from {json_file}")
+            continue
 
+        model_idx = int(match.group(1))
         scores[model_idx] = score
 
     if not scores:
-        print(f"No valid aggregate_score found in {chai1_folder_path}")
-    else:
-        best_model_idx = max(scores, key=scores.get)
-        print(f"Best model: {best_model_idx} with score {scores[best_model_idx]}")
+        print(f"No valid sample_ranking_score found in {seed_path}")
+        continue
 
-        chai1_cifs = [f for f in os.listdir(chai1_folder_path) if f.lower().endswith(".cif") and f"pred.model_idx_{best_model_idx}" in f]
+    best_model_idx = max(scores, key=scores.get)
+    print(f"Best model: {best_model_idx} with score {scores[best_model_idx]}")
 
-        if not chai1_cifs:
-            print(f"No matching CIF for best model {best_model_idx} in {chai1_folder_path}")
-        else:
-            best_cif_path = os.path.join(chai1_folder_path, chai1_cifs[0])
-            print(f"Selected CIF file: {best_cif_path}")
-        
-        print(f"Processing {af3_folder}")
+    cif_pattern = os.path.join(seed_path, f"*sample_{best_model_idx}_model.cif")
+    of3_cifs = glob.glob(cif_pattern)
+
+    if not of3_cifs:
+        print(f"No CIF for best model {best_model_idx} in {seed_path}")
+        continue
+
+    of3_cif_path = of3_cifs[0]
+    print(f"Selected OF3 CIF file: {of3_cif_path}")
+    print(f"Processing {af3_folder}")
 
     try:
         # Load reference + original mobile structure
@@ -202,7 +230,7 @@ for chai1_folder, af3_folder in pairs:
         # -------------------------
         # RMSD when aligned on binder
         # -------------------------
-        structure_mob = parser.get_structure("mobA", best_cif_path)
+        structure_mob = parser.get_structure("mobA", of3_cif_path)
         binder_rmsd_on_binder = rmsd_of_binder_after_alignment(
             structure_ref, structure_mob, align_chain="A"
         )
@@ -210,7 +238,7 @@ for chai1_folder, af3_folder in pairs:
         # -------------------------
         # RMSD when aligned on target
         # -------------------------
-        structure_mob = parser.get_structure("mobB", best_cif_path)
+        structure_mob = parser.get_structure("mobB", of3_cif_path)
         binder_rmsd_on_target = rmsd_of_binder_after_alignment(
             structure_ref, structure_mob, align_chain="B"
         )

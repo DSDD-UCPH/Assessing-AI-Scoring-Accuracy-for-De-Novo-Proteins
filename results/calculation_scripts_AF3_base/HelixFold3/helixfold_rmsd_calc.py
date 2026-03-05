@@ -3,7 +3,7 @@ A script that does several things:
 1. Directory setup.
 2. Extracts and matches the corresponding .cif files.
 3. Matches the suffix of this .cif file with the names of the AF3 predictions.
-4. Calculates the RMSD between the best Chai-1 model and the corresponding AF3 predictions.
+4. Calculates the RMSD between the best HelixFold3 model and the corresponding AF3 predictions.
 5. Generates a CSV file with the calculated values for each and every complex.
 """
 
@@ -18,10 +18,17 @@ import re
 
 ### Part 0. Functions. ###
 
+def get_chain_by_prefix(model, chain_id_prefix):
+    for cid in model.child_dict.keys():
+        if cid.startswith(chain_id_prefix):
+            return model.child_dict[cid]
+    raise KeyError(f"No chain starting with '{chain_id_prefix}'. "
+                   f"Available chains: {list(model.child_dict.keys())}")
+
 def get_ca_atoms_by_resid(structure, chain_id):
     """Return CA atoms dict {resid -> atom} for a given chain."""
     model = structure[0]
-    chain = model[chain_id]
+    chain = get_chain_by_prefix(model, chain_id)
 
     ca_dict = {}
     for residue in chain:
@@ -89,30 +96,26 @@ def normalize_for_fuzzy_match(s):
     s = re.sub(r'[^a-z0-9.]', '', s)
     return s
 
-def strip_egfr_prefix(folder_name):
-    if folder_name.lower().startswith("egfr_"):
-        return folder_name[5:]
-    return folder_name
-
 ### Part 1. Directory setup. ###
 
 af3_root = "/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/results/AF3/AF3_run1_output"
-chai1_root = "/mnt/dsdd_share/Elliott/chai_run1"
+helixfold_root = "/mnt/dsdd_share/Elliott/helixfold_output_v2"
 
 parser = MMCIFParser(QUIET=True)
 
 results = []
 
-# --- Chai-1 lookup ---
-chai1_lookup = {}
+# --- HelixFold lookup ---
+helixfold_lookup = {}
 
-for folder in os.listdir(chai1_root):
-    full_path = os.path.join(chai1_root, folder)
+for folder in os.listdir(helixfold_root):
+    full_path = os.path.join(helixfold_root, folder)
     if not os.path.isdir(full_path):
         continue
 
     normalized = normalize_for_fuzzy_match(folder)
-    chai1_lookup[normalized] = folder
+    helixfold_lookup[normalized] = folder
+
 
 # --- AF3 lookup ---
 af3_lookup = {}
@@ -135,16 +138,16 @@ for _, row in df.iterrows():
     csv_id = normalize_for_fuzzy_match(str(row["id"]))
     csv_name = normalize_for_fuzzy_match(str(row["name"]))
 
-    chai1_folder = chai1_lookup.get(csv_id)
+    helixfold_folder = helixfold_lookup.get(csv_id)
     af3_folder = af3_lookup.get(csv_name)
 
-    if chai1_folder and af3_folder:
-        pairs.append((chai1_folder, af3_folder))
+    if helixfold_folder and af3_folder:
+        pairs.append((helixfold_folder, af3_folder))
     else:
         print(f"Could not match: id={csv_id}, name={csv_name}")
 
-for chai1_folder, af3_folder in pairs:
-    chai1_folder_path = os.path.join(chai1_root, chai1_folder)
+for helixfold_folder, af3_folder in pairs:
+    helixfold_folder_path = os.path.join(helixfold_root, helixfold_folder)
     af3_folder_path = os.path.join(af3_root, af3_folder)
 
     # Get AF3 CIF
@@ -156,44 +159,19 @@ for chai1_folder, af3_folder in pairs:
 
     af3_cif_path = os.path.join(af3_folder_path, af3_cifs[0])
 
-    # Get CHAI-1 CIF
+    # Get HelixFold3 CIF
 
-    npz_files = [f for f in os.listdir(chai1_folder_path) if f.lower().endswith(".npz") and "scores.model_idx_" in f]
+    pattern = os.path.join(helixfold_folder_path, "*-rank1", "predicted_structure.cif")
 
-    if not npz_files:
-        print(f"No scored npz in CHAI-1 folder {chai1_folder}")
+    helixfold_cifs = glob.glob(pattern)
+
+    if not helixfold_cifs:
+        print(f"No rank1 CIF in HelixFold folder {helixfold_folder}")
         continue
 
-    scores = {}
+    helixfold_cif_path = helixfold_cifs[0]
 
-    for npz_file in npz_files:
-        npz_path = os.path.join(chai1_folder_path, npz_file)
-        data = np.load(npz_path, allow_pickle=True)
-        if "aggregate_score" not in data:
-            print(f"No aggregate_score in {npz_file}")
-            continue
-
-        score = data["aggregate_score"].item()
-
-        model_idx = int(npz_file.split("_")[-1].split(".")[0])
-
-        scores[model_idx] = score
-
-    if not scores:
-        print(f"No valid aggregate_score found in {chai1_folder_path}")
-    else:
-        best_model_idx = max(scores, key=scores.get)
-        print(f"Best model: {best_model_idx} with score {scores[best_model_idx]}")
-
-        chai1_cifs = [f for f in os.listdir(chai1_folder_path) if f.lower().endswith(".cif") and f"pred.model_idx_{best_model_idx}" in f]
-
-        if not chai1_cifs:
-            print(f"No matching CIF for best model {best_model_idx} in {chai1_folder_path}")
-        else:
-            best_cif_path = os.path.join(chai1_folder_path, chai1_cifs[0])
-            print(f"Selected CIF file: {best_cif_path}")
-        
-        print(f"Processing {af3_folder}")
+    print(f"Processing {af3_folder}")
 
     try:
         # Load reference + original mobile structure
@@ -202,7 +180,7 @@ for chai1_folder, af3_folder in pairs:
         # -------------------------
         # RMSD when aligned on binder
         # -------------------------
-        structure_mob = parser.get_structure("mobA", best_cif_path)
+        structure_mob = parser.get_structure("mobA", helixfold_cif_path)
         binder_rmsd_on_binder = rmsd_of_binder_after_alignment(
             structure_ref, structure_mob, align_chain="A"
         )
@@ -210,7 +188,7 @@ for chai1_folder, af3_folder in pairs:
         # -------------------------
         # RMSD when aligned on target
         # -------------------------
-        structure_mob = parser.get_structure("mobB", best_cif_path)
+        structure_mob = parser.get_structure("mobB", helixfold_cif_path)
         binder_rmsd_on_target = rmsd_of_binder_after_alignment(
             structure_ref, structure_mob, align_chain="B"
         )
