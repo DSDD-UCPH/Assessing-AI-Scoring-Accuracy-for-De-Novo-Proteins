@@ -71,7 +71,7 @@ def split_residue_key(res_key):
     resseq, icode = res_key
     return int(resseq), str(icode) if icode is not None else ""
 
-def extract_interface_contacts(structure, binder_chain_id, target_chain_id, cutoff=5.0):
+def extract_interface_contacts(structure, binder_chain_id, target_chain_id, cutoff=10.0):
     """
     Returns:
         target_contact_keys: set of contacted target residue keys
@@ -111,12 +111,14 @@ def extract_interface_contacts(structure, binder_chain_id, target_chain_id, cuto
                 target_key = residue_key(target_res)
 
                 target_contact_keys.add(target_key)
+                # 👹 we should collect the contact biner residues, this is the total residues of the binder
                 binder_contact_keys.add(binder_key)
+                # 👹 the contact pair, I am not very sure
                 contact_pairs.add((target_key, binder_key))
 
     return target_contact_keys, binder_contact_keys, contact_pairs
 
-def compute_contacts_for_row(row, cutoff=5.0):
+def compute_contacts_for_row(row, cutoff=10.0):
     """
     Returns:
         summary_row: dict
@@ -190,7 +192,7 @@ if __name__ == "__main__":
     SUMMARY_PATH = DATA_DIR / "contact_interface_data/rank1_contact_summary_5A.parquet"
     TARGET_LONG_PATH = DATA_DIR / "contact_interface_data/rank1_target_contacts_long_5A.parquet"
 
-    cutoff = 5.0
+    cutoff = 10.0
 
     df = pd.read_parquet(INPUT_PATH)
 

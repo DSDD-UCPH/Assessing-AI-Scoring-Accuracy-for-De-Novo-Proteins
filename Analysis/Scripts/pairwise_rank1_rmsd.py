@@ -274,7 +274,7 @@ def compute_binder_ca_rmsd_for_row(row):
         file_type_2=row.get("file_type_2"),
     )
 
-### Binder RMSD when aligned on target within 10 Å of binder (pocket specific alignment
+### Binder RMSD when aligned on target within 10 Å of binder (pocket specific alignment)
 ### Do method pairs agree on the local binding pose/orientation relative to the target pocket?
 
 def get_protein_residues(chain):
@@ -306,7 +306,7 @@ def get_target_shell_residues(target_chain, binder_chain, cutoff=10.0):
             if ns.search(atom.coord, cutoff):
                 shell_residues.append(residue)
                 break
-
+    # this is the list of resiudes in the interface of the target
     return shell_residues
 
 def residue_key(residue):
@@ -317,6 +317,7 @@ def get_residue_dict(chain):
     return {residue_key(res): res for res in get_protein_residues(chain)}
 
 def get_matched_ca_atoms_from_residue_keys(chain_1, chain_2, keys):
+    # for two targets
     res_dict_1 = get_residue_dict(chain_1)
     res_dict_2 = get_residue_dict(chain_2)
 
@@ -370,7 +371,7 @@ def compute_binder_ca_rmsd_aligned_on_target_shell(
         target_1 = get_chain_by_id(structure_1, target_chain_1)
         target_2 = get_chain_by_id(structure_2, target_chain_2)
 
-        # --- shell residues from reference structure
+        # --- shell residues from reference structure target
         shell_residues_1 = get_target_shell_residues(
             target_chain=target_1,
             binder_chain=binder_1,

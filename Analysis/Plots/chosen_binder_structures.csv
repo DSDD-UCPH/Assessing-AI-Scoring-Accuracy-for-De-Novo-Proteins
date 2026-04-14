@@ -1,0 +1,10 @@
+binder_sequence,method,path,score,score_name
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,AF2,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/AF2/EGFR_violet-shark-wave/ranked_0.pdb,0.8979267766769377,iptm+ptm
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,AF3,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/AF3/antorsae.ta_4_4/seed-0_sample-0/antorsae.ta_4_4_seed-0_sample-0_model.cif,0.37,ranking_score
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,Boltz-2,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/Boltz-2/antorsae.TA_4_4/antorsae.TA_4_4_model_0.cif,,
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,Chai-1,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/Chai-1/violet-shark-wave/pred.model_idx_3.cif,0.7197346091270447,aggregate_score
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,HelixFold3,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/HelixFold3/violet-shark-wave/violet-shark-wave-rank1/predicted_structure.cif,-1.0,folder_rank
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,OF2,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/OF2/violet_shark_wave-EGFR_model_1_multimer_v3_relaxed.pdb,,
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,OF3,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/OF3/violet_shark_wave/seed_42/violet_shark_wave_seed_42_sample_5_model.cif,0.7490495443344116,sample_ranking_score
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,Protenix,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/Protenix/antorsae.TA_4_4_EGFR/seed_101/predictions/antorsae.TA_4_4_EGFR_sample_0.cif,0.8461427688598633,ranking_score
+TYCLHGTPVYISSLNKWSCVCDKGWYGERCEF,SeedFold,/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Predictions/SeedFold/violet-shark-wave/violet-shark-wave_model_0.cif,0.9150043725967407,confidence_score
