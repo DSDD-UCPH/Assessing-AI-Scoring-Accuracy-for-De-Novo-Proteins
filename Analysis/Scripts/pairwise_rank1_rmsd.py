@@ -380,6 +380,10 @@ def compute_binder_ca_rmsd_aligned_on_target_shell(
 
         shell_keys = [residue_key(res) for res in shell_residues_1]
 
+        print(shell_keys)
+        print(target_2)
+
+
         if len(shell_keys) == 0:
             return {
                 "binder_ca_rmsd_align_target_shell": np.nan,
@@ -394,6 +398,9 @@ def compute_binder_ca_rmsd_aligned_on_target_shell(
         shell_ca_1, shell_ca_2 = get_matched_ca_atoms_from_residue_keys(
             target_1, target_2, shell_keys
         )
+
+        print(shell_ca_1)
+        print(shell_ca_2)
 
         if len(shell_ca_1) < 3:
             return {
