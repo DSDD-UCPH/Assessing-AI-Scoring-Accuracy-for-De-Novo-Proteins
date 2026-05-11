@@ -44,7 +44,7 @@ Overall flow:
     -> unified dataset compilation
 """
 
-from itertools import combinations
+from itertools import combinations, permutations
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -52,6 +52,7 @@ from joblib import Parallel, delayed
 import tempfile
 import os
 import gemmi
+from tqdm.auto import tqdm
 
 from Bio.PDB import PDBParser, MMCIFParser, Superimposer, NeighborSearch
 from Bio.PDB.Polypeptide import is_aa
@@ -66,6 +67,7 @@ def build_rank1_method_pairs(
         binder_id_col: str = "binder_chain_id",
         target_id_col: str = "target_chain_id",
         keep_cols: list[str] | None = None,
+        directed: bool = False,
     ) -> pd.DataFrame:
     if keep_cols is None:
         keep_cols = ["score", "score_name"]
@@ -96,11 +98,15 @@ def build_rank1_method_pairs(
 
         records = group.to_dict("records")
 
-        for rec1, rec2 in combinations(records, 2):
+        pair_iter = permutations(records, 2) if directed else combinations(records, 2)
+
+        for rec1, rec2 in pair_iter:
             row = {
                 binder_col: binder_seq,
-                "method_1": rec1[method_col],
-                "method_2": rec2[method_col],
+
+                ("reference_method" if directed else "method_1"): rec1[method_col],
+                ("query_method" if directed else "method_2"): rec2[method_col],
+
                 "structure_path_1": rec1[structure_file_col],
                 "structure_path_2": rec2[structure_file_col],
                 "file_type_1": rec1[file_type_col],
@@ -122,9 +128,9 @@ def build_rank1_method_pairs(
     pair_df = pd.DataFrame(pair_rows)
 
     if not pair_df.empty:
-        pair_df = pair_df.sort_values(
-            by=[binder_col, "method_1", "method_2"]
-        ).reset_index(drop=True)
+        sort_cols = ([binder_col, "reference_method", "query_method"] if directed else [binder_col, "method_1", "method_2"])
+
+        pair_df = pair_df.sort_values(by=sort_cols).reset_index(drop=True)
 
     return pair_df
 
@@ -274,6 +280,124 @@ def compute_binder_ca_rmsd_for_row(row):
         file_type_2=row.get("file_type_2"),
     )
 
+### All atom binder RMSD
+
+def extract_protein_common_atoms(chain_1, chain_2):
+    atoms_1 = []
+    atoms_2 = []
+
+    residues_1 = [
+        r for r in chain_1
+        if r.id[0] == " " and is_aa(r, standard=False)
+    ]
+
+    residues_2 = [
+        r for r in chain_2
+        if r.id[0] == " " and is_aa(r, standard=False)
+    ]
+
+    if len(residues_1) != len(residues_2):
+        return atoms_1, atoms_2, len(residues_1), len(residues_2)
+
+    for res1, res2 in zip(residues_1, residues_2):
+        atom_names_1 = {atom.name for atom in res1}
+        atom_names_2 = {atom.name for atom in res2}
+
+        common_atom_names = sorted(atom_names_1 & atom_names_2)
+
+        # Optional: skip hydrogens if present
+        common_atom_names = [
+            name for name in common_atom_names
+            if not name.startswith("H")
+        ]
+
+        for atom_name in common_atom_names:
+            atoms_1.append(res1[atom_name])
+            atoms_2.append(res2[atom_name])
+
+    return atoms_1, atoms_2, len(residues_1), len(residues_2)
+
+def compute_binder_all_atom_rmsd_aligned_on_binder(
+    path_1,
+    path_2,
+    binder_chain_1,
+    binder_chain_2,
+    file_type_1=None,
+    file_type_2=None):
+
+    try:
+        structure_1 = load_structure_biopython(
+            path_1, file_type=file_type_1, structure_id="ref"
+        )
+        structure_2 = load_structure_biopython(
+            path_2, file_type=file_type_2, structure_id="mov"
+        )
+
+        chain_1 = get_chain_by_id(structure_1, binder_chain_1)
+        chain_2 = get_chain_by_id(structure_2, binder_chain_2)
+
+        atoms_1, atoms_2, binder_len_1, binder_len_2 = extract_protein_common_atoms(
+            chain_1,
+            chain_2
+        )
+
+        n_atoms = len(atoms_1)
+
+        if binder_len_1 != binder_len_2:
+            return {
+                "binder_all_atom_rmsd_align_binder": np.nan,
+                "n_atoms_aligned": n_atoms,
+                "binder_len_1": binder_len_1,
+                "binder_len_2": binder_len_2,
+                "status_all_atom": "failed",
+                "error_all_atom": (
+                    f"Binder residue counts differ: {binder_len_1} vs {binder_len_2}. "
+                    "Cannot safely superimpose by residue order."
+                )
+            }
+
+        if n_atoms == 0:
+            return {
+                "binder_all_atom_rmsd_align_binder": np.nan,
+                "n_atoms_aligned": 0,
+                "binder_len_1": binder_len_1,
+                "binder_len_2": binder_len_2,
+                "status_all_atom": "failed",
+                "error_all_atom": "No common atoms found between binder chains."
+            }
+
+        sup = Superimposer()
+        sup.set_atoms(atoms_1, atoms_2)
+
+        return {
+            "binder_all_atom_rmsd_align_binder": float(sup.rms),
+            "n_atoms_aligned": n_atoms,
+            "binder_len_1": binder_len_1,
+            "binder_len_2": binder_len_2,
+            "status_all_atom": "ok",
+            "error_all_atom": None
+        }
+
+    except Exception as e:
+        return {
+            "binder_all_atom_rmsd_align_binder": np.nan,
+            "n_atoms_aligned": 0,
+            "binder_len_1": np.nan,
+            "binder_len_2": np.nan,
+            "status_all_atom": "failed",
+            "error_all_atom": str(e)
+        }
+
+def compute_binder_all_atom_rmsd_for_row(row):
+    return compute_binder_all_atom_rmsd_aligned_on_binder(
+        path_1=row["structure_path_1"],
+        path_2=row["structure_path_2"],
+        binder_chain_1=row["binder_chain_1"],
+        binder_chain_2=row["binder_chain_2"],
+        file_type_1=row.get("file_type_1", None),
+        file_type_2=row.get("file_type_2", None),
+    )
+
 ### Binder RMSD when aligned on target within 10 Å of binder (pocket specific alignment)
 ### Do method pairs agree on the local binding pose/orientation relative to the target pocket?
 
@@ -380,9 +504,6 @@ def compute_binder_ca_rmsd_aligned_on_target_shell(
 
         shell_keys = [residue_key(res) for res in shell_residues_1]
 
-        print(shell_keys)
-        print(target_2)
-
 
         if len(shell_keys) == 0:
             return {
@@ -398,9 +519,6 @@ def compute_binder_ca_rmsd_aligned_on_target_shell(
         shell_ca_1, shell_ca_2 = get_matched_ca_atoms_from_residue_keys(
             target_1, target_2, shell_keys
         )
-
-        print(shell_ca_1)
-        print(shell_ca_2)
 
         if len(shell_ca_1) < 3:
             return {
@@ -490,10 +608,18 @@ def compute_target_shell_rmsd_for_row(row, cutoff=10.0):
     )
 if __name__ == "__main__":
     PAIR_PATH = Path("/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Data/pairwise_method_comparisons_rank1_only.parquet")
+
     RMSD_PATH = Path("/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Data/pairwise_method_comparisons_rank1_with_binder_ca_rmsd.parquet")
-    SHELL_RMSD_PATH = Path("/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Data/pairwise_method_comparisons_rank1_with_binder_ca_rmsd_and_target_shell_rmsd.parquet")
+
+    ALL_ATOM_RMSD_PATH = Path("/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Data/pairwise_method_comparisons_rank1_with_binder_all_atom_rmsd.parquet")
+
+    SHELL_PAIR_PATH = Path("/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Data/directed_method_comparisons_rank1_only.parquet")
+
+    SHELL_RMSD_PATH = Path("/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Data/directed_method_comparisons_rank1_with_target_shell_rmsd.parquet")
 
     df = pd.read_parquet("/home/postyr/Assessing-AI-Scoring-Accuracy-for-De-Novo-Proteins/Analysis/Data/prediction_records_new.parquet")
+
+    # BASE TRIANGULAR PAIRS FOR SYMMETRIC BINDER RMSD ALIGNED ON BINDER
 
     pair_df = build_rank1_method_pairs(
         df,
@@ -505,16 +631,18 @@ if __name__ == "__main__":
         binder_id_col="binder_chain_id",
         target_id_col="target_chain_id",
         keep_cols=["score", "score_name"],
+        directed=False,
     )
 
     # Save the base pair dataframe
     pair_df.to_parquet(PAIR_PATH, index=False)
 
+    print(pair_df.groupby("binder_sequence").size().value_counts())
     print(pair_df.head())
-    print(f"Number of pairwise comparisons: {len(pair_df)}")
+    print(f"Number of triangular pairwise comparisons: {len(pair_df)}")
     print(f"Saved to: {PAIR_PATH}")
 
-    # Compute binder CA RMSD
+    # Compute binder CA RMSD aligned on binder - Triangular
 
     results = Parallel(n_jobs=-2, verbose=10)(
         delayed(compute_binder_ca_rmsd_for_row)(row)
@@ -523,7 +651,10 @@ if __name__ == "__main__":
 
     results_df = pd.DataFrame(results)
 
-    pair_df_with_rmsd = pd.concat([pair_df, results_df], axis=1)
+    pair_df_with_rmsd = pd.concat(
+        [pair_df.reset_index(drop=True), results_df],
+        axis=1
+    )
 
     print(pair_df_with_rmsd[
         [
@@ -538,21 +669,91 @@ if __name__ == "__main__":
 
     print(pair_df_with_rmsd["status"].value_counts(dropna=False))
 
-    # Save dataframe with RMSD results
     pair_df_with_rmsd.to_parquet(RMSD_PATH, index=False)
-    print(f"Saved RMSD results to: {RMSD_PATH}")
+    print(f"Saved binder CA RMSD results to: {RMSD_PATH}")
+
+    # Binder aligned all-atom RMSD - Triangular
+
+    all_atom_results = Parallel(n_jobs=-2, verbose=10)(
+    delayed(compute_binder_all_atom_rmsd_for_row)(row)
+    for _, row in pair_df.iterrows())
+
+    all_atom_results_df = pd.DataFrame(all_atom_results)
+
+    pair_df_with_all_atom_rmsd = pd.concat(
+    [pair_df.reset_index(drop=True), all_atom_results_df],
+    axis=1)
+
+    print(pair_df_with_all_atom_rmsd[
+    [
+        "method_1",
+        "method_2",
+        "binder_all_atom_rmsd_align_binder",
+        "n_atoms_aligned",
+        "status_all_atom",
+        "error_all_atom",
+    ]].head())
+
+    print(pair_df_with_all_atom_rmsd["status_all_atom"].value_counts(dropna=False))
+
+    pair_df_with_all_atom_rmsd.to_parquet(ALL_ATOM_RMSD_PATH, index=False)
+
+    print(f"Saved all-atom RMSD results to: {ALL_ATOM_RMSD_PATH}")
+ 
+    # --------------------------------------------------
+    # 4. Directed pairs for target-shell RMSD
+    # --------------------------------------------------
+
+    shell_pair_df = build_rank1_method_pairs(
+        df,
+        binder_col="binder_sequence",
+        method_col="method",
+        structure_file_col="path",
+        rank_col="rank",
+        file_type_col="file_type",
+        binder_id_col="binder_chain_id",
+        target_id_col="target_chain_id",
+        keep_cols=["score", "score_name"],
+        directed=True,
+    )
+
+    shell_pair_df.to_parquet(SHELL_PAIR_PATH, index=False)
+
+    print(shell_pair_df.groupby("binder_sequence").size().value_counts())
+    print(shell_pair_df.head())
+    print(f"Number of directed target-shell comparisons: {len(shell_pair_df)}")
+    print(f"Saved directed pairs to: {SHELL_PAIR_PATH}")
+
+    # --------------------------------------------------
+    # 5. Target-shell RMSD — directed
+    # --------------------------------------------------
 
     shell_results = Parallel(n_jobs=-2, verbose=10)(
         delayed(compute_target_shell_rmsd_for_row)(row, 10.0)
-        for _, row in pair_df_with_rmsd.iterrows()
+        for _, row in shell_pair_df.iterrows()
     )
 
     shell_results_df = pd.DataFrame(shell_results)
 
     pair_df_with_shell_rmsd = pd.concat(
-        [pair_df_with_rmsd.reset_index(drop=True), shell_results_df],
+        [shell_pair_df.reset_index(drop=True), shell_results_df],
         axis=1
     )
 
+    print(pair_df_with_shell_rmsd[
+        [
+            "reference_method",
+            "query_method",
+            "binder_ca_rmsd_align_target_shell",
+            "n_shell_residues_ref",
+            "n_shell_ca_aligned",
+            "n_binder_ca_compared",
+            "status_target_shell",
+            "error_target_shell",
+        ]
+    ].head())
+
+    print(pair_df_with_shell_rmsd["status_target_shell"].value_counts(dropna=False))
+
     pair_df_with_shell_rmsd.to_parquet(SHELL_RMSD_PATH, index=False)
-    print(f"Saved target-shell RMSD results to: {SHELL_RMSD_PATH}")
+    print(f"Saved directed target-shell RMSD results to: {SHELL_RMSD_PATH}")
