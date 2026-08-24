@@ -88,20 +88,12 @@ Consensus / combined scoring
 
 ## Repository Structure
 
-```text
-.
-├── data/
-├── scripts/
-├── notebooks/
-├── figures/
-├── results/
-└── README.md
-```
+All the source code for the analysis is found within the /Analysis directory.
 
 ## Thesis
 
 **Title:**
-*Assessing AI Scoring Accuracy Through Consensus Scoring, Interface Analysis, and RMSD Comparison in De Novo Proteins*
+*Evaluating AI Complex Prediction Methods Through Consensus and Agreement Analysis of De Novo Protein Binders Targeting EGFR*
 
 **Institution:** University of Copenhagen (UCPH)
 **Research Group:** Data Science for Drug Design (DSDD)
